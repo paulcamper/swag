@@ -18,7 +18,7 @@ import (
 )
 
 // Operation describes a single API operation on a path.
-// For more information: https://github.com/swaggo/swag#api-operation
+// For more information: https://github.com/paulcamper/swag#api-operation
 type Operation struct {
 	HTTPMethod string
 	Path       string
@@ -138,6 +138,7 @@ func (operation *Operation) ParseParamComment(commentLine string, astFile *ast.F
 	name := matches[1]
 	paramType := matches[2]
 	refType := TransToValidSchemeType(matches[3])
+	refType = operation.parser.SetTypeName(astFile, refType)
 
 	// Detect refType
 	objectType := "object"
@@ -222,6 +223,7 @@ func (operation *Operation) registerSchemaType(schemaType string, astFile *ast.F
 	}
 	pkgName := refSplit[0]
 	typeName := refSplit[1]
+
 	if typeSpec, ok := operation.parser.TypeDefinitions[pkgName][typeName]; ok {
 		operation.parser.registerTypes[schemaType] = typeSpec
 		return nil
@@ -562,6 +564,7 @@ func (operation *Operation) ParseResponseComment(commentLine string, astFile *as
 
 	schemaType := strings.Trim(matches[2], "{}")
 	refType := matches[3]
+	refType = operation.parser.SetTypeName(astFile, refType)
 
 	if operation.parser != nil { // checking refType has existing in 'TypeDefinitions'
 		if err := operation.registerSchemaType(refType, astFile); err != nil {

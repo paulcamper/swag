@@ -64,6 +64,13 @@ type Parser struct {
 
 	// markdownFileDir holds the path to the folder, where markdown files are stored
 	markdownFileDir string
+
+	// file paths map[astFile]real_go_file_path
+	filePaths map[*ast.File]string
+
+	// packagesWithDuplicates used to set package name if project has another package with identical
+	// name and with identical structures names
+	PackagesWithDuplicates []string
 }
 
 // New creates a new Parser with default properties.
@@ -87,6 +94,7 @@ func New(options ...func(*Parser)) *Parser {
 		TypeDefinitions:      make(map[string]map[string]*ast.TypeSpec),
 		CustomPrimitiveTypes: make(map[string]string),
 		registerTypes:        make(map[string]*ast.TypeSpec),
+		filePaths:            make(map[*ast.File]string),
 	}
 
 	for _, option := range options {
@@ -501,8 +509,10 @@ func (parser *Parser) ParseRouterAPIInfo(fileName string, astFile *ast.File) err
 
 // ParseType parses type info for given astFile.
 func (parser *Parser) ParseType(astFile *ast.File) {
-	if _, ok := parser.TypeDefinitions[astFile.Name.String()]; !ok {
-		parser.TypeDefinitions[astFile.Name.String()] = make(map[string]*ast.TypeSpec)
+	name := parser.SetTypeName(astFile, astFile.Name.String())
+
+	if _, ok := parser.TypeDefinitions[name]; !ok {
+		parser.TypeDefinitions[name] = make(map[string]*ast.TypeSpec)
 	}
 
 	for _, astDeclaration := range astFile.Decls {
@@ -514,7 +524,7 @@ func (parser *Parser) ParseType(astFile *ast.File) {
 					if IsGolangPrimitiveType(typeName) {
 						parser.CustomPrimitiveTypes[typeSpec.Name.String()] = TransToValidSchemeType(typeName)
 					} else {
-						parser.TypeDefinitions[astFile.Name.String()][typeSpec.Name.String()] = typeSpec
+						parser.TypeDefinitions[name][typeSpec.Name.String()] = typeSpec
 					}
 
 				}
@@ -571,11 +581,17 @@ func (parser *Parser) ParseDefinition(pkgName, typeName string, typeSpec *ast.Ty
 
 	Println("Generating " + refTypeName)
 
-	schema, err := parser.parseTypeExpr(pkgName, typeName, typeSpec.Type)
+	var tp ast.Expr
+	if typeSpec != nil {
+		tp = typeSpec.Type
+	}
+
+	schema, err := parser.parseTypeExpr(pkgName, typeName, tp)
 	if err != nil {
 		return err
 	}
 	parser.swagger.Definitions[refTypeName] = schema
+
 	return nil
 }
 
@@ -1326,6 +1342,7 @@ func (parser *Parser) parseFile(path string) error {
 		}
 
 		parser.files[path] = astFile
+		parser.filePaths[astFile] = path
 	}
 	return nil
 }
@@ -1354,4 +1371,20 @@ func (parser *Parser) Skip(path string, f os.FileInfo) error {
 // GetSwagger returns *spec.Swagger which is the root document object for the API specification.
 func (parser *Parser) GetSwagger() *spec.Swagger {
 	return parser.swagger
+}
+
+func (parser *Parser) SetTypeName(astFile *ast.File, name string) string {
+	for _, pkgName := range parser.PackagesWithDuplicates {
+		if strings.Contains(name, pkgName) {
+			const firstSubPkgPos = 1
+
+			path := strings.ReplaceAll(parser.filePaths[astFile], ".", "_")
+			path = strings.ReplaceAll(path, "/", "_")
+			pkgs := strings.Split(path, "_")
+
+			return pkgs[firstSubPkgPos] + "_" + name
+		}
+	}
+
+	return name
 }
